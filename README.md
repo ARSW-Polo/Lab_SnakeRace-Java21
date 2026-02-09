@@ -66,6 +66,15 @@ co.eci.snake
 
 > Objetivo didáctico: practicar suspensión/continuación **sin** espera activa y consolidar el modelo de monitores en Java.
 
+## Solución
+- Usé un solo “candado” (monitor) para coordinar a todos los hilos.
+- Cuando toca pausar, marco una bandera paused = true.
+- Cada hilo revisa esa bandera; si está en pausa, se duerme con wait() sin gastar CPU.
+- Para reanudar, pongo paused = false y llamo notifyAll() para despertar a todos.
+- No hay “lost wakeups” porque la condición se revisa dentro de un while bajo el mismo synchronized.
+
+![alt text](image.png)
+
 ---
 
 ## Parte II — SnakeRace concurrente (núcleo del laboratorio)
