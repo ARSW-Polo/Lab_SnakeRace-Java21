@@ -14,6 +14,7 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 
 public final class SnakeApp extends JFrame {
@@ -23,7 +24,7 @@ public final class SnakeApp extends JFrame {
   private final JButton actionButton;
   private final JLabel statusLabel;
   private final GameClock clock;
-  private final java.util.List<Snake> snakes = new java.util.ArrayList<>();
+  private final List<Snake> snakes = new CopyOnWriteArrayList<>();
   private final PauseController pauseController;
   private GameState state = GameState.STOPPED;
 
@@ -40,7 +41,7 @@ public final class SnakeApp extends JFrame {
     }
 
     this.pauseController = new PauseController(snakes.size(), true);
-    this.gamePanel = new GamePanel(board, () -> snakes);
+    this.gamePanel = new GamePanel(board, () -> List.copyOf(snakes));
     this.actionButton = new JButton("Iniciar");
     this.statusLabel = new JLabel(" ");
 

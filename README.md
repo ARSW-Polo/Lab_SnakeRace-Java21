@@ -131,6 +131,12 @@ Al momento de pausar se muestra en la interfaz la serpiente mas larga (por longi
 - El juego **no debe romperse**: sin `ConcurrentModificationException`, sin lecturas inconsistentes, sin _deadlocks_.
 - Si habilitas **teleports** y **turbo**, verifica que las reglas no introduzcan carreras.
 
+### Solución
+
+Para soportar N alto se blindaron las lecturas concurrentes: la UI recibe un snapshot de la lista de serpientes, y el cuerpo de cada serpiente se lee con snapshot sincronizado. Esto evita `ConcurrentModificationException` durante el repintado. El tablero ya entrega copias de sus colecciones y `step(...)` es atómico, por lo que no hay lecturas a medio actualizar incluso con teleports y turbo activos.
+
+En pruebas con N alto el juego se mantiene estable: no aparecen lecturas inconsistentes ni deadlocks, ya que se usa un unico lock por recurso (Snake y Board) sin dependencias circulares.
+
 > Entregables detallados más abajo.
 
 ---
