@@ -49,16 +49,17 @@ public final class SnakeApp extends JFrame {
     north.add(statusLabel);
     north.add(controlsLabel);
     add(north, BorderLayout.NORTH);
-    var south = new JPanel(new FlowLayout(FlowLayout.CENTER));
+    var south = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 5));
     south.add(actionButton);
     south.add(restartButton);
     add(south, BorderLayout.SOUTH);
 
     setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-    pack();
-    setLocationRelativeTo(null);
 
     resetGame(true);
+
+    pack();
+    setLocationRelativeTo(null);
 
     actionButton.addActionListener((ActionEvent e) -> handleAction());
     restartButton.addActionListener((ActionEvent e) -> resetGame(false));
@@ -193,6 +194,7 @@ public final class SnakeApp extends JFrame {
     restartButton.setEnabled(true);
     statusLabel.setText(" ");
     configureControls();
+    pack();
   }
 
   private void configureControls() {
