@@ -15,23 +15,141 @@ import java.awt.event.ActionEvent;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class SnakeApp extends JFrame {
 
-  private final Board board;
-  private final GamePanel gamePanel;
+  private Board board;
+  private GamePanel gamePanel;
   private final JButton actionButton;
+  private final JButton restartButton;
   private final JLabel statusLabel;
-  private final GameClock clock;
-  private final List<Snake> snakes = new CopyOnWriteArrayList<>();
-  private final PauseController pauseController;
+  private final JLabel controlsLabel;
+  private GameClock clock;
+  private List<Snake> snakes = new CopyOnWriteArrayList<>();
+  private PauseController pauseController;
+  private ExecutorService exec;
   private GameState state = GameState.STOPPED;
+  private AtomicBoolean gameOver = new AtomicBoolean(false);
+  private AtomicInteger worstSnake = new AtomicInteger(-1);
 
   public SnakeApp() {
     super("The Snake Race");
-    this.board = new Board(35, 28);
+    this.actionButton = new JButton("Iniciar");
+    this.restartButton = new JButton("Reiniciar");
+    this.statusLabel = new JLabel(" ");
+    this.controlsLabel = new JLabel("Controles: Flechas (P1), WASD (P2), Espacio (Pausar)");
 
+    setLayout(new BorderLayout());
+    var north = new JPanel();
+    north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
+    north.add(statusLabel);
+    north.add(controlsLabel);
+    add(north, BorderLayout.NORTH);
+    var south = new JPanel(new FlowLayout(FlowLayout.CENTER));
+    south.add(actionButton);
+    south.add(restartButton);
+    add(south, BorderLayout.SOUTH);
+
+    setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+    pack();
+    setLocationRelativeTo(null);
+
+    resetGame(true);
+
+    actionButton.addActionListener((ActionEvent e) -> handleAction());
+    restartButton.addActionListener((ActionEvent e) -> resetGame(false));
+
+    setVisible(true);
+  }
+
+  private void handleAction() {
+    if (gameOver.get()) return;
+    switch (state) {
+      case STOPPED -> startGame();
+      case RUNNING -> pauseGame();
+      case PAUSED -> resumeGame();
+    }
+  }
+
+  private void startGame() {
+    actionButton.setText("Pausar");
+    state = GameState.RUNNING;
+    statusLabel.setText(" ");
+    clock.start();
+    pauseController.resume();
+  }
+
+  private void pauseGame() {
+    actionButton.setText("Reanudar");
+    state = GameState.PAUSED;
+    try {
+      pauseController.requestPauseAndWait();
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      return;
+    }
+    clock.pause();
+    statusLabel.setText(buildPauseStats());
+  }
+
+  private void resumeGame() {
+    actionButton.setText("Pausar");
+    state = GameState.RUNNING;
+    statusLabel.setText(" ");
+    clock.resume();
+    pauseController.resume();
+  }
+
+  private String buildPauseStats() {
+    int longestIdx = -1;
+    int longestLen = -1;
+    for (int i = 0; i < snakes.size(); i++) {
+      int len = snakes.get(i).length();
+      if (len > longestLen) {
+        longestLen = len;
+        longestIdx = i;
+      }
+    }
+    String longest = (longestIdx >= 0)
+        ? "Serpiente " + longestIdx + " (len=" + longestLen + ")"
+        : "N/A";
+    int worstIdx = worstSnake.get();
+    String worst = (worstIdx >= 0)
+        ? "Serpiente " + worstIdx
+        : "Ninguna ha muerto";
+    return "Mas larga: " + longest + " | Peor: " + worst;
+  }
+
+  private void handleGameOver(int snakeIdx) {
+    worstSnake.compareAndSet(-1, snakeIdx);
+    pauseController.resume();
+    SwingUtilities.invokeLater(() -> {
+      clock.stop();
+      state = GameState.STOPPED;
+      actionButton.setEnabled(false);
+      actionButton.setText("Iniciar");
+      restartButton.setEnabled(true);
+      statusLabel.setText("Juego terminado. Perdio la serpiente " + snakeIdx);
+    });
+  }
+
+  private void resetGame(boolean initial) {
+    if (!initial) {
+      if (gameOver != null) gameOver.set(true);
+      if (pauseController != null) pauseController.resume();
+      if (exec != null) exec.shutdownNow();
+      if (clock != null) {
+        clock.stop();
+        clock.close();
+      }
+    }
+
+    this.board = new Board(35, 28);
+    this.snakes = new CopyOnWriteArrayList<>();
     int N = Integer.getInteger("snakes", 2);
     for (int i = 0; i < N; i++) {
       int x = 2 + (i * 3) % board.width();
@@ -41,37 +159,58 @@ public final class SnakeApp extends JFrame {
     }
 
     this.pauseController = new PauseController(snakes.size(), true);
+    this.gameOver = new AtomicBoolean(false);
+    this.worstSnake = new AtomicInteger(-1);
+
+    var oldPanel = this.gamePanel;
     this.gamePanel = new GamePanel(board, () -> List.copyOf(snakes));
-    this.actionButton = new JButton("Iniciar");
-    this.statusLabel = new JLabel(" ");
-
-    setLayout(new BorderLayout());
-    add(statusLabel, BorderLayout.NORTH);
-    add(gamePanel, BorderLayout.CENTER);
-    add(actionButton, BorderLayout.SOUTH);
-
-    setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-    pack();
-    setLocationRelativeTo(null);
+    if (initial) {
+      add(gamePanel, BorderLayout.CENTER);
+    } else {
+      if (oldPanel != null) remove(oldPanel);
+      add(gamePanel, BorderLayout.CENTER);
+      revalidate();
+      repaint();
+    }
 
     this.clock = new GameClock(60, () -> SwingUtilities.invokeLater(gamePanel::repaint));
+    this.exec = Executors.newVirtualThreadPerTaskExecutor();
+    for (int i = 0; i < snakes.size(); i++) {
+      int idx = i;
+      exec.submit(new SnakeRunner(
+          snakes.get(i),
+          board,
+          pauseController,
+          snakes,
+          idx,
+          gameOver,
+          this::handleGameOver));
+    }
 
-    var exec = Executors.newVirtualThreadPerTaskExecutor();
-    snakes.forEach(s -> exec.submit(new SnakeRunner(s, board, pauseController)));
+    state = GameState.STOPPED;
+    actionButton.setEnabled(true);
+    actionButton.setText("Iniciar");
+    restartButton.setEnabled(true);
+    statusLabel.setText(" ");
+    configureControls();
+  }
 
-    actionButton.addActionListener((ActionEvent e) -> handleAction());
+  private void configureControls() {
+    var im = gamePanel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+    var am = gamePanel.getActionMap();
+    im.clear();
+    am.clear();
 
-    gamePanel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke("SPACE"), "pause");
-    gamePanel.getActionMap().put("pause", new AbstractAction() {
+    im.put(KeyStroke.getKeyStroke("SPACE"), "pause");
+    am.put("pause", new AbstractAction() {
       @Override
       public void actionPerformed(ActionEvent e) {
         handleAction();
       }
     });
 
+    if (snakes.isEmpty()) return;
     var player = snakes.get(0);
-    InputMap im = gamePanel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
-    ActionMap am = gamePanel.getActionMap();
     im.put(KeyStroke.getKeyStroke("LEFT"), "left");
     im.put(KeyStroke.getKeyStroke("RIGHT"), "right");
     im.put(KeyStroke.getKeyStroke("UP"), "up");
@@ -132,62 +271,6 @@ public final class SnakeApp extends JFrame {
         }
       });
     }
-
-    setVisible(true);
-  }
-
-  private void handleAction() {
-    switch (state) {
-      case STOPPED -> startGame();
-      case RUNNING -> pauseGame();
-      case PAUSED -> resumeGame();
-    }
-  }
-
-  private void startGame() {
-    actionButton.setText("Pausar");
-    state = GameState.RUNNING;
-    statusLabel.setText(" ");
-    clock.start();
-    pauseController.resume();
-  }
-
-  private void pauseGame() {
-    actionButton.setText("Reanudar");
-    state = GameState.PAUSED;
-    try {
-      pauseController.requestPauseAndWait();
-    } catch (InterruptedException ie) {
-      Thread.currentThread().interrupt();
-      return;
-    }
-    clock.pause();
-    statusLabel.setText(buildPauseStats());
-  }
-
-  private void resumeGame() {
-    actionButton.setText("Pausar");
-    state = GameState.RUNNING;
-    statusLabel.setText(" ");
-    clock.resume();
-    pauseController.resume();
-  }
-
-  private String buildPauseStats() {
-    int longestIdx = -1;
-    int longestLen = -1;
-    for (int i = 0; i < snakes.size(); i++) {
-      int len = snakes.get(i).length();
-      if (len > longestLen) {
-        longestLen = len;
-        longestIdx = i;
-      }
-    }
-    String longest = (longestIdx >= 0)
-        ? "Serpiente " + longestIdx + " (len=" + longestLen + ")"
-        : "N/A";
-    String worst = "Ninguna ha muerto";
-    return "Mas larga: " + longest + " | Peor: " + worst;
   }
 
   public static final class GamePanel extends JPanel {
