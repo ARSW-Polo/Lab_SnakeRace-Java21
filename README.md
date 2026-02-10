@@ -87,11 +87,29 @@ co.eci.snake
   - **Colecciones** o estructuras **no seguras** en contexto concurrente.
   - Ocurrencias de **espera activa** (busy-wait) o de sincronización innecesaria.
 
+### Solución
+
+El juego usa un hilo virtual por serpiente. En la UI se crea un SnakeRunner por cada serpiente y se ejecuta con un Executor de virtual threads, así cada serpiente avanza de forma autónoma. El repintado de la UI se hace con un reloj (GameClock) que dispara ticks periódicos y llama a repaint en el hilo de Swing. Ver SnakeApp.java:48-52 y SnakeRunner.java:21-34.
+
+Hay posibles condiciones de carrera en el cuerpo de la serpiente: el hilo de la serpiente modifica el ArrayDeque en advance(...) mientras la UI hace snapshot() para pintar. Como no hay sincronización, pueden aparecer lecturas inconsistentes. Ver Snake.java:7-40 y SnakeApp.java:212-226. La dirección sí es volatile, por lo que los cambios de turn(...) tienen visibilidad entre hilos. Ver Snake.java:8-29.
+
+En cuanto a colecciones no seguras, el cuerpo de la serpiente usa ArrayDeque, que no es thread-safe y se comparte entre hilos (serpiente y UI). También la lista de serpientes es un ArrayList; en el código actual no se modifica tras construirse, pero no sería segura si se modificara concurrentemente. Ver Snake.java:7-39 y SnakeApp.java:23-37.
+
+No se observa espera activa (busy-wait): cada serpiente duerme con Thread.sleep(...), y el reloj usa un ScheduledExecutorService para los ticks. Ver SnakeRunner.java:32-34 y GameClock.java:23-27. El tablero usa sincronización en step(...) y en los getters para proteger sus colecciones internas; esto evita carreras pero bloquea todo el método (región crítica amplia). Ver Board.java:34-67.
+
 ### 2) Correcciones mínimas y regiones críticas
 
 - **Elimina** esperas activas reemplazándolas por **señales** / **estados** o mecanismos de la librería de concurrencia.
 - Protege **solo** las **regiones críticas estrictamente necesarias** (evita bloqueos amplios).
 - Justifica en **`el reporte de laboratorio`** cada cambio: cuál era el riesgo y cómo lo resuelves.
+
+### Solución
+
+No hay esperas activas reales en el código: cada serpiente duerme con Thread.sleep(...) y el reloj usa un ScheduledExecutorService. Por eso no fue necesario reemplazar busy-wait; se mantiene ese mecanismo porque no consume CPU de forma activa.
+
+La corrección mínima fue proteger el cuerpo de la serpiente, que es un ArrayDeque compartido entre el hilo de la serpiente y la UI. Se usa un solo lock en Snake y se sincronizan únicamente las operaciones sobre el deque y maxLength (advance, head y snapshot). Así la región crítica es corta y el repintado solo lee un snapshot consistente.
+
+En el tablero se mantiene step(...) sincronizado porque en un solo movimiento se leen y modifican varias colecciones (mice, obstacles, turbo, teleports). Esa sección debe ser atómica para evitar estados intermedios; fuera de eso, no se agregan bloqueos extra.
 
 ### 3) Control de ejecución seguro (UI)
 
