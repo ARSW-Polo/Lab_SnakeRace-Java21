@@ -42,6 +42,12 @@ public final class Snake {
     }
   }
 
+  public int length() {
+    synchronized (lock) {
+      return body.size();
+    }
+  }
+
   public void advance(Position newHead, boolean grow) {
     synchronized (lock) {
       body.addFirst(newHead);

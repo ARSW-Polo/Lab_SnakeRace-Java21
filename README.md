@@ -24,7 +24,7 @@ mvn -q -DskipTests exec:java -Dsnakes=4
 - **Controles**:
   - **Flechas**: serpiente **0** (Jugador 1).
   - **WASD**: serpiente **1** (si existe).
-  - **Espacio** o botón **Action**: Pausar / Reanudar.
+  - **Espacio** o botón **Iniciar/Pausar/Reanudar**.
 
 ---
 
@@ -47,7 +47,7 @@ co.eci.snake
 ├─ core/                # Dominio: Board, Snake, Direction, Position
 ├─ core/engine/         # GameClock (ticks, Pausa/Reanudar)
 ├─ concurrency/         # SnakeRunner (lógica por serpiente con virtual threads)
-└─ ui/legacy/           # UI estilo legado (Swing) con grilla y botón Action
+└─ ui/legacy/           # UI estilo legado (Swing) con grilla y boton de control
 ```
 
 ---
@@ -113,11 +113,17 @@ En el tablero se mantiene step(...) sincronizado porque en un solo movimiento se
 
 ### 3) Control de ejecución seguro (UI)
 
-- Implementa la **UI** con **Iniciar / Pausar / Reanudar** (ya existe el botón _Action_ y el reloj `GameClock`).
+- Implementa la **UI** con **Iniciar / Pausar / Reanudar** (ya existe el boton y el reloj `GameClock`).
 - Al **Pausar**, muestra de forma **consistente** (sin _tearing_):
   - La **serpiente viva más larga**.
   - La **peor serpiente** (la que **primero murió**).
 - Considera que la suspensión **no es instantánea**; coordina para que el estado mostrado no quede “a medias”.
+
+### Solución
+
+Se agregó un control de pausa compartido entre la UI y los hilos de las serpientes. Al pausar, la UI pide la pausa y espera a que todos los hilos confirmen que ya estan detenidos; solo entonces se congela el reloj y se calculan las estadisticas. Al reanudar, se libera a todos con una sola señal. El boton ahora tiene tres estados: Iniciar, Pausar y Reanudar.
+
+Al momento de pausar se muestra en la interfaz la serpiente mas larga (por longitud actual) y el campo de “peor serpiente”. En esta version no hay muerte de serpientes, por lo que el texto muestra “Ninguna ha muerto”.
 
 ### 4) Robustez bajo carga
 
